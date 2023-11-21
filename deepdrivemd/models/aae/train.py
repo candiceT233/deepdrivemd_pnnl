@@ -233,7 +233,15 @@ def main(
     if comm_size > 1:
         init_weights = comm.bcast(init_weights, 0)
         h5_file = comm.bcast(h5_file, 0)
-
+    
+    gpu=None
+    
+    if torch.cuda.is_available():
+        enc_device = torch.device(f"cuda:{encoder_gpu}")
+        gpu=(encoder_gpu, generator_gpu, discriminator_gpu)
+    else:
+        enc_device = torch.device("cpu")
+        
     # construct model
     aae = AAE3d(
         cfg.num_points,
@@ -241,14 +249,11 @@ def main(
         cfg.batch_size,
         model_hparams,
         optimizer_hparams,
-        gpu=(encoder_gpu, generator_gpu, discriminator_gpu),
+        gpu=gpu,
         init_weights=init_weights,
     )
 
-    if torch.cuda.is_available():
-        enc_device = torch.device(f"cuda:{encoder_gpu}")
-    else:
-        enc_device = torch.device("cpu")
+        
     if comm_size > 1:
         if (encoder_gpu == generator_gpu) and (encoder_gpu == discriminator_gpu):
             aae.model = DDP(
