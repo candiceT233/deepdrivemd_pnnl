@@ -13,6 +13,8 @@ SIM_LENGTH=0.1
 
 DROP_CACHE=false
 
+SKIP_SIM=true
+
 # export HDF5_PAGE_BUFFER_SIZE=1048576 # 4096 8192 32768 65536 131072 262144 524288 1048576 4194304 8388608
 # echo "HDF5_PAGE_BUFFER_SIZE=$HDF5_PAGE_BUFFER_SIZE"
 
@@ -42,33 +44,36 @@ if [ "$FS_PATH" == "NFS" ]
 then
     echo "Running on NFS"
     export EXPERIMENT_PATH=~/experiments/$USER/ddmd_runs/$TEST_OUT_PATH #NFS
-    export DDMD_PATH=/home/mtang11/scripts/deepdrivemd #NFS
-    export MOLECULES_PATH=/home/mtang11/scripts/deepdrivemd/examples/hermes_ddmd/molecules #NFS
+    export DDMD_PATH=/home/$USER/scripts/deepdrivemd #NFS
+    export MOLECULES_PATH=/home/$USER/scripts/deepdrivemd/examples/hermes_ddmd/molecules #NFS
 else
     echo "Running on PFS"
     echo "PFS not available yet"
     exit 1
 
     export EXPERIMENT_PATH=~/experiments/$USER/ddmd_runs/$TEST_OUT_PATH #NFS
-    export DDMD_PATH=/home/mtang11/scripts/deepdrivemd #NFS
-    export MOLECULES_PATH=/home/mtang11/scripts/deepdrivemd/examples/hermes_ddmd/molecules #NFS
+    export DDMD_PATH=/home/$USER/scripts/deepdrivemd #NFS
+    export MOLECULES_PATH=/home/$USER/scripts/deepdrivemd/examples/hermes_ddmd/molecules #NFS
 fi
 set +x
 
 mkdir -p $EXPERIMENT_PATH/*
-rm -rf $EXPERIMENT_PATH/*
-ls $EXPERIMENT_PATH/* -hl
+if [ "$SKIP_SIM" == true ]
+then
+    echo "Skipping simulation..."
+    rm -rf $EXPERIMENT_PATH/agent_runs/*
+    rm -rf $EXPERIMENT_PATH/inference_runs/*
+    rm -rf $EXPERIMENT_PATH/machine_learning_runs/*
+    rm -rf $EXPERIMENT_PATH/model_selection_runs/*
+
+else
+    echo "Running simulation..."
+    rm -rf $EXPERIMENT_PATH/*
+fi
 
 
 # load environment variables for Hermes
 ulimit -c unlimited
-source $HOME/scripts/deepdrivemd/examples/hermes_ddmd/load_hermes_deps.sh
-# source $HOME/scripts/deepdrivemd/examples/hermes_ddmd/env_var.sh # for Hermes
-
-mkdir -p $DEV1_DIR/hermes_slabs
-mkdir -p $DEV2_DIR/hermes_slabs
-rm -rf $DEV1_DIR/hermes_slabs/*
-rm -rf $DEV2_DIR/hermes_slabs/*
 
 
 OPENMM () {
@@ -96,7 +101,7 @@ OPENMM () {
     sed -e "s/\$SIM_LENGTH/${SIM_LENGTH}/" -e "s/\$OUTPUT_PATH/${dest_path//\//\\/}/" -e "s/\$EXPERIMENT_PATH/${EXPERIMENT_PATH//\//\\/}/" -e "s/\$DDMD_PATH/${DDMD_PATH//\//\\/}/" -e "s/\$GPU_IDX/${gpu_idx}/" -e "s/\$STAGE_IDX/${STAGE_IDX}/" $yaml_path  > $dest_path/$(basename $yaml_path)
     yaml_path=$dest_path/$(basename $yaml_path)
 
-    PYTHONPATH=$DDMD_PATH:$MOLECULES_PATH srun -w $node_id -n1 -N1 --exclusive ~/.conda/envs/hermes_openmm7_ddmd/bin/python $DDMD_PATH/deepdrivemd/sim/openmm/run_openmm.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
+    PYTHONPATH=$DDMD_PATH:$MOLECULES_PATH srun -w $node_id -n1 -N1 --exclusive python $DDMD_PATH/deepdrivemd/sim/openmm/run_openmm.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
     #PYTHONPATH=~/git/molecules/ srun -w $node_id -N1 python /people/leeh736/git/DeepDriveMD-pipeline/deepdrivemd/sim/openmm/run_openmm.py -c $yaml_path &>> $task_id.log &
     #srun -n1 env LD_PRELOAD=~/git/tazer_forked/build.h5/src/client/libclient.so PYTHONPATH=~/git/molecules/ python /people/leeh736/git/DeepDriveMD-pipeline/deepdrivemd/sim/openmm/run_openmm.py -c /qfs/projects/oddite/leeh736/ddmd_runs/test/md_direct.yaml &> $task_id.log &
 }
@@ -115,10 +120,14 @@ AGGREGATE () {
     eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
     source activate hermes_openmm7_ddmd
 
+    cd $dest_path
+    echo "Running AGGREGATE at $node_id ..."
+    echo cd $dest_path
+
     sed -e "s/\$SIM_LENGTH/${SIM_LENGTH}/" -e "s/\$OUTPUT_PATH/${dest_path//\//\\/}/" -e "s/\$EXPERIMENT_PATH/${EXPERIMENT_PATH//\//\\/}/" -e "s/\$STAGE_IDX/${STAGE_IDX}/" $yaml_path  > $dest_path/$(basename $yaml_path)
     yaml_path=$dest_path/$(basename $yaml_path)
 
-    { time PYTHONPATH=$DDMD_PATH/ ~/.conda/envs/hermes_openmm7_ddmd/bin/python $DDMD_PATH/deepdrivemd/aggregation/basic/aggregate.py -c $yaml_path ; } &> ${task_id}_${FUNCNAME[0]}.log 
+    { time PYTHONPATH=$DDMD_PATH/ python $DDMD_PATH/deepdrivemd/aggregation/basic/aggregate.py -c $yaml_path ; } &> ${task_id}_${FUNCNAME[0]}.log 
 
     #env LD_PRELOAD=/qfs/people/leeh736/git/tazer_forked/build.h5.pread64.bluesky/src/client/libclient.so PYTHONPATH=$DDMD_PATH/ python /files0/oddite/deepdrivemd/src/deepdrivemd/aggregation/basic/aggregate.py -c /qfs/projects/oddite/leeh736/ddmd_runs/1k/agg_test.yaml &> agg_test_output.log
 }
@@ -139,7 +148,7 @@ TRAINING () {
     cp -p $DDMD_PATH/test/bba/stage0000_task0000.json $EXPERIMENT_PATH/model_selection_runs/$STAGE_IDX_FORMAT/task0000/${STAGE_IDX_FORMAT}_task0000.json
 
     eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
-    source activate hm_ddmd_pytorch_deception
+    source activate hm_ddmd_pytorch
 
     mkdir -p $dest_path
     cd $dest_path
@@ -148,12 +157,12 @@ TRAINING () {
     sed -e "s/\$SIM_LENGTH/${SIM_LENGTH}/" -e "s/\$OUTPUT_PATH/${dest_path//\//\\/}/" -e "s/\$EXPERIMENT_PATH/${EXPERIMENT_PATH//\//\\/}/" -e "s/\$STAGE_IDX/${STAGE_IDX}/" $yaml_path  > $dest_path/$(basename $yaml_path)
     yaml_path=$dest_path/$(basename $yaml_path)
 
-   echo PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -n1 -N1 --exclusive ~/.conda/envs/hm_ddmd_pytorch_deception/bin/python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path ${task_id}_${FUNCNAME[0]}.log 
+   echo PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -n1 -N1 --exclusive python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path ${task_id}_${FUNCNAME[0]}.log 
    if [ "$SHORTENED_PIPELINE" == true ]
    then
-       PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -n1 -N1 --exclusive ~/.conda/envs/hm_ddmd_pytorch_deception/bin/python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
+       PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -n1 -N1 --exclusive python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
    else
-       PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -n1 -N1 --exclusive ~/.conda/envs/hm_ddmd_pytorch_deception/bin/python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log
+       PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -n1 -N1 --exclusive python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log
    fi
 
 }
@@ -169,7 +178,7 @@ INFERENCE () {
 
 
     eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
-    source activate hm_ddmd_pytorch_deception
+    source activate hm_ddmd_pytorch
 
     mkdir -p $dest_path
     cd $dest_path
@@ -201,8 +210,8 @@ INFERENCE () {
 
     echo "model_checkpoint = $model_checkpoint"
 
-    # OMP_NUM_THREADS=4 PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -N1 ~/.conda/envs/hm_ddmd_pytorch_deception/bin/python $DDMD_PATH/deepdrivemd/agents/lof/lof.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log 
-    OMP_NUM_THREADS=4 PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH ~/.conda/envs/hm_ddmd_pytorch_deception/bin/python $DDMD_PATH/deepdrivemd/agents/lof/lof.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log     
+    # OMP_NUM_THREADS=4 PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -N1 python $DDMD_PATH/deepdrivemd/agents/lof/lof.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log 
+    OMP_NUM_THREADS=4 PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH python $DDMD_PATH/deepdrivemd/agents/lof/lof.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log     
 
 }
 
@@ -225,38 +234,71 @@ drop_cache_time=0
 for iter in $(seq $ITER_COUNT)
 do
 
-    # Drop Cache
-    if [ "$DROP_CACHE" == true ] then
-        dc_start_time=$(($(date +%s%N)/1000000))
-        srun -n$SLURM_JOB_NUM_NODES -w $hostlist sudo /sbin/sysctl vm.drop_caches=3
-        dc_duration=$(( $(date +%s%N)/1000000 - $dc_start_time))
-        drop_cache_time=$(( $drop_cache_time + $dc_duration ))
-        echo "Current drop_cache_time (ms) : $drop_cache_time"
-    fi
-    # STAGE 1: OpenMM
-    start_time=$SECONDS
-    for node in $NODE_NAMES
-    do
-        while [ $MD_SLICE -gt 0 ] && [ $MD_START -lt $MD_RUNS ]
+    # # Drop Cache
+    # if [ "$DROP_CACHE" == true ] then
+    #     dc_start_time=$(($(date +%s%N)/1000000))
+    #     srun -n$SLURM_JOB_NUM_NODES -w $hostlist sudo /sbin/sysctl vm.drop_caches=3
+    #     dc_duration=$(( $(date +%s%N)/1000000 - $dc_start_time))
+    #     drop_cache_time=$(( $drop_cache_time + $dc_duration ))
+    #     echo "Current drop_cache_time (ms) : $drop_cache_time"
+    # fi
+
+    if [ "$SKIP_SIM" == false ]
+    then
+
+        # STAGE 1: OpenMM
+        start_time=$SECONDS
+        for node in $NODE_NAMES
         do
-            
-            OPENMM $MD_START $node
-            MD_START=$(($MD_START + 1))
-            MD_SLICE=$(($MD_SLICE - 1))
+            while [ $MD_SLICE -gt 0 ] && [ $MD_START -lt $MD_RUNS ]
+            do
+                
+                OPENMM $MD_START $node
+                MD_START=$(($MD_START + 1))
+                MD_SLICE=$(($MD_SLICE - 1))
+            done
+            MD_SLICE=$(($MD_RUNS/$NODE_COUNT))
         done
-        MD_SLICE=$(($MD_RUNS/$NODE_COUNT))
-    done
+
+        wait
+        duration=$(($SECONDS - $start_time))
+        echo "OpenMM done... $(($duration / 60)) minutes and $(($duration % 60)) seconds elapsed ($duration secs)."
+    else
+        echo "No OpenMM, SKIP_SIM = $SKIP_SIM..."
+    fi
 
     MD_START=0
 
+    STAGE_IDX_FORMAT="$(STAGE_UPDATE)"
+    STAGE_IDX=$((STAGE_IDX + 1))
+    echo $STAGE_IDX_FORMAT
+
+    # # Drop Cache
+    # if [ "$DROP_CACHE" == true ] then
+    #     dc_start_time=$(($(date +%s%N)/1000000))
+    #     srun -n$SLURM_JOB_NUM_NODES -w $hostlist sudo /sbin/sysctl vm.drop_caches=3
+    #     dc_duration=$(( $(date +%s%N)/1000000 - $dc_start_time))
+    #     drop_cache_time=$(( $drop_cache_time + $dc_duration ))
+    #     # echo "Current drop_cache_time (ms) : $drop_cache_time"
+    # fi
+
+    # STAGE 2: Aggregate
+    if [ "$SHORTENED_PIPELINE" != true ]
+    then
+        start_time=$SECONDS
+        srun -N1 $( AGGREGATE )
+        wait 
+        duration=$(($SECONDS - $start_time))
+        echo "Aggregate done... $(($duration / 60)) minutes and $(($duration % 60)) seconds elapsed ($duration secs)."
+    else
+        echo "No AGGREGATE, SHORTENED_PIPELINE = $SHORTENED_PIPELINE..."
+    fi
+
     wait
 
-    duration=$(($SECONDS - $start_time))
-    echo "OpenMM done... $(($duration / 60)) minutes and $(($duration % 60)) seconds elapsed ($duration secs)."
-
-    # STAGE_IDX_FORMAT="$(STAGE_UPDATE)"
-    # STAGE_IDX=$((STAGE_IDX + 1))
-    # echo $STAGE_IDX_FORMAT
+    STAGE_IDX_FORMAT="$(STAGE_UPDATE)"
+    STAGE_IDX=$((STAGE_IDX + 1))
+    echo $STAGE_IDX_FORMAT
 
     # # Drop Cache
     # if [ "$DROP_CACHE" == true ] then
@@ -267,52 +309,26 @@ do
     #     # echo "Current drop_cache_time (ms) : $drop_cache_time"
     # fi
 
-    # # STAGE 2: Aggregate
-    # if [ "$SHORTENED_PIPELINE" != true ]
-    # then
-    #     start_time=$SECONDS
-    #     srun -N1 $( AGGREGATE )
-    #     wait 
-    #     duration=$(($SECONDS - $start_time))
-    #     echo "Aggregate done... $(($duration / 60)) minutes and $(($duration % 60)) seconds elapsed ($duration secs)."
-    # else
-    #     echo "No AGGREGATE, SHORTENED_PIPELINE = $SHORTENED_PIPELINE..."
-    # fi
-
-    # wait
-
-    # STAGE_IDX_FORMAT="$(STAGE_UPDATE)"
-    # STAGE_IDX=$((STAGE_IDX + 1))
-    # echo $STAGE_IDX_FORMAT
-
-    # # Drop Cache
-    # if [ "$DROP_CACHE" == true ] then
-    #     dc_start_time=$(($(date +%s%N)/1000000))
-    #     srun -n$SLURM_JOB_NUM_NODES -w $hostlist sudo /sbin/sysctl vm.drop_caches=3
-    #     dc_duration=$(( $(date +%s%N)/1000000 - $dc_start_time))
-    #     drop_cache_time=$(( $drop_cache_time + $dc_duration ))
-    #     # echo "Current drop_cache_time (ms) : $drop_cache_time"
-    # fi
-    # # STAGE 3: Training
-    # start_time=$SECONDS
-    # if [ "$SHORTENED_PIPELINE" != true ]
-    # then
-    #     TRAINING
-    #     duration=$(($SECONDS - $start_time))
-    #     echo "Training done... $(($duration / 60)) minutes and $(($duration % 60)) seconds elapsed ($duration secs)."
-    # else
-    #     TRAINING
-    #     echo "Training not waited, SHORTENED_PIPELINE = $SHORTENED_PIPELINE..."
-    # fi
+    # STAGE 3: Training
+    start_time=$SECONDS
+    if [ "$SHORTENED_PIPELINE" != true ]
+    then
+        TRAINING
+        duration=$(($SECONDS - $start_time))
+        echo "Training done... $(($duration / 60)) minutes and $(($duration % 60)) seconds elapsed ($duration secs)."
+    else
+        TRAINING
+        echo "Training not waited, SHORTENED_PIPELINE = $SHORTENED_PIPELINE..."
+    fi
     
 
-    # STAGE_IDX_FORMAT="$(STAGE_UPDATE)"
-    # STAGE_IDX=$((STAGE_IDX + 1))
-    # echo $STAGE_IDX_FORMAT
-    # if [ "$SHORTENED_PIPELINE" != true ]
-    # then
-    #     wait
-    # fi
+    STAGE_IDX_FORMAT="$(STAGE_UPDATE)"
+    STAGE_IDX=$((STAGE_IDX + 1))
+    echo $STAGE_IDX_FORMAT
+    if [ "$SHORTENED_PIPELINE" != true ]
+    then
+        wait
+    fi
 
     # # Drop Cache
     # if [ "$DROP_CACHE" == true ] then
@@ -322,18 +338,19 @@ do
     #     drop_cache_time=$(( $drop_cache_time + $dc_duration ))
     #     # echo "Current drop_cache_time (ms) : $drop_cache_time"
     # fi
-    # # STAGE 4: Inference
-    # start_time=$SECONDS
-    # # srun -N1 $( INFERENCE )
-    # INFERENCE
 
-    # wait
-    # duration=$(($SECONDS - $start_time))
-    # echo "Inference done... $(($duration / 60)) minutes and $(($duration % 60)) seconds elapsed ($duration secs)."
+    # STAGE 4: Inference
+    start_time=$SECONDS
+    # srun -N1 $( INFERENCE )
+    INFERENCE
 
-    # STAGE_IDX_FORMAT="$(STAGE_UPDATE)"
-    # STAGE_IDX=$((STAGE_IDX + 1))
-    # echo $STAGE_IDX_FORMAT
+    wait
+    duration=$(($SECONDS - $start_time))
+    echo "Inference done... $(($duration / 60)) minutes and $(($duration % 60)) seconds elapsed ($duration secs)."
+
+    STAGE_IDX_FORMAT="$(STAGE_UPDATE)"
+    STAGE_IDX=$((STAGE_IDX + 1))
+    echo $STAGE_IDX_FORMAT
 
 done
 
