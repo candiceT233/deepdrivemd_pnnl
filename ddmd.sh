@@ -1,7 +1,7 @@
 #!/bin/bash
 
 SHORTENED_PIPELINE=false
-SKIP_SIM=true
+SKIP_SIM=false
 MD_RUNS=12
 ITER_COUNT=1 # TBD
 SIM_LENGTH=0.1
@@ -72,7 +72,7 @@ TRACKER_PRELOAD_DIR="`scspkg pkg root dayu_tracker`"/lib
 TRACKER_VFD_PAGE_SIZE=8192 # 8192 16384 32768 65536 131072 262144 524288 1048576
 echo "TRACKER_PRELOAD_DIR : `ls -l $TRACKER_PRELOAD_DIR/*`"
 export HDF5_VOL_CONNECTOR="tracker under_vol=0;under_info={};path=$schema_file_path;level=2;format="
-export HDF5_PLUGIN_PATH=$TRACKER_PRELOAD_DIR/vol:$TRACKER_PRELOAD_DIR/vfd:$HDF5_PLUGIN_PATH
+export HDF5_PLUGIN_PATH="$TRACKER_PRELOAD_DIR/vol:$TRACKER_PRELOAD_DIR/vfd:$HDF5_PLUGIN_PATH"
 export HDF5_DRIVER=hdf5_tracker_vfd
 export HDF5_DRIVER_CONFIG="${schema_file_path};${TRACKER_VFD_PAGE_SIZE}"
 export HDF5_USE_FILE_LOCKING='FALSE'
@@ -82,10 +82,12 @@ SET_CONDA_ENV_VARS(){
     for env in $CONDA_OPENMM $CONDA_PYTORCH
     do
         echo "Setting Conda Environment Variables in $env..."
-        conda env config vars set HDF5_VOL_CONNECTOR=$HDF5_VOL_CONNECTOR -n $env
-        conda env config vars set HDF5_PLUGIN_PATH=$HDF5_PLUGIN_PATH -n $env
-        conda env config vars set HDF5_DRIVER=$HDF5_DRIVER -n $env
-        conda env config vars set HDF5_DRIVER_CONFIG=$HDF5_DRIVER_CONFIG -n $env
+        set -x
+        conda env config vars set -n $env HDF5_VOL_CONNECTOR=$HDF5_VOL_CONNECTOR
+        conda env config vars set -n $env HDF5_PLUGIN_PATH=$HDF5_PLUGIN_PATH 
+        conda env config vars set -n $env HDF5_DRIVER=$HDF5_DRIVER
+        conda env config vars set -n $env HDF5_DRIVER_CONFIG=$HDF5_DRIVER_CONFIG
+        set +x
     done
 }
 
@@ -96,7 +98,10 @@ UNSET_CONDA_ENV_VARS(){
     for env in $CONDA_OPENMM $CONDA_PYTORCH
     do
         echo "Unsetting Conda Environment Variables in $env..."
-        conda env config vars unset -n $env
+        conda env config vars set -n $env HDF5_VOL_CONNECTOR
+        conda env config vars set -n $env HDF5_PLUGIN_PATH
+        conda env config vars set -n $env HDF5_DRIVER
+        conda env config vars set -n $env HDF5_DRIVER_CONFIG
     done
 }
 
@@ -160,8 +165,8 @@ AGGREGATE(){
     yaml_path=$DDMD_PATH/test/bba/${stage_name}_stage_test.yaml
     PREP_TASK_NAME "$stage_name"
 
-    # eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
-    # source activate $CONDA_OPENMM
+    eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
+    source activate $CONDA_OPENMM
 
     cd $dest_path
     echo cd $dest_path
@@ -172,8 +177,17 @@ AGGREGATE(){
     # { time PYTHONPATH=$DDMD_PATH/ python $DDMD_PATH/deepdrivemd/aggregation/basic/aggregate.py -c $yaml_path ; } &> $dest_path/${task_id}_${FUNCNAME[0]}.log 
 
     # PYTHONPATH=$DDMD_PATH/ ~/miniconda3/envs/${CONDA_OPENMM}/bin/python $DDMD_PATH/deepdrivemd/aggregation/basic/aggregate.py -c $yaml_path &> $dest_path/${task_id}_${FUNCNAME[0]}.log 
-    conda run -n $CONDA_OPENMM PYTHONPATH=$DDMD_PATH/ python $DDMD_PATH/deepdrivemd/aggregation/basic/aggregate.py -c $yaml_path &> $dest_path/${task_id}_${FUNCNAME[0]}.log 
+    set -x
+    # conda run -n $CONDA_OPENMM \
 
+        HDF5_VOL_CONNECTOR="tracker under_vol=0;under_info={};path=$schema_file_path;level=2;format=" \
+        HDF5_PLUGIN_PATH="$TRACKER_PRELOAD_DIR/vol:$TRACKER_PRELOAD_DIR/vfd:$HDF5_PLUGIN_PATH" \
+        HDF5_DRIVER=hdf5_tracker_vfd \
+        HDF5_DRIVER_CONFIG="${schema_file_path};${TRACKER_VFD_PAGE_SIZE}" \
+        PYTHONPATH=$DDMD_PATH/ \
+        python $DDMD_PATH/deepdrivemd/aggregation/basic/aggregate.py -c $yaml_path &> $dest_path/${task_id}_${FUNCNAME[0]}.log 
+    
+    set +x
 
     #env LD_PRELOAD=/qfs/people/leeh736/git/tazer_forked/build.h5.pread64.bluesky/src/client/libclient.so PYTHONPATH=$DDMD_PATH/ python /files0/oddite/deepdrivemd/src/deepdrivemd/aggregation/basic/aggregate.py -c /qfs/projects/oddite/leeh736/ddmd_runs/1k/agg_test.yaml &> agg_test_output.log
 }
@@ -191,8 +205,8 @@ TRAINING () {
     cp -p $DDMD_PATH/test/bba/stage0000_task0000.json $EXPERIMENT_PATH/model_selection_runs/$STAGE_IDX_FORMAT/task0000/${STAGE_IDX_FORMAT}_task0000.json
 
 
-    # eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
-    # source activate $CONDA_PYTORCH
+    eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
+    source activate $CONDA_PYTORCH
 
     mkdir -p $dest_path
     cd $dest_path
@@ -206,11 +220,21 @@ TRAINING () {
    then
         #PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -n1 -N1 --exclusive python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
         # PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH ~/miniconda3/envs/${CONDA_PYTORCH}/bin/python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
-        conda run -n $CONDA_PYTORCH PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
+
+        HDF5_VOL_CONNECTOR="tracker under_vol=0;under_info={};path=$schema_file_path;level=2;format=" \
+        HDF5_PLUGIN_PATH="$TRACKER_PRELOAD_DIR/vol:$TRACKER_PRELOAD_DIR/vfd:$HDF5_PLUGIN_PATH" \
+        HDF5_DRIVER=hdf5_tracker_vfd \
+        HDF5_DRIVER_CONFIG="${schema_file_path};${TRACKER_VFD_PAGE_SIZE}" \
+        PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
    else
         #    PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -n1 -N1 --exclusive python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log
         # PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH ~/miniconda3/envs/${CONDA_PYTORCH}/bin/python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log
-        conda run -n $CONDA_PYTORCH PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log
+
+        HDF5_VOL_CONNECTOR="tracker under_vol=0;under_info={};path=$schema_file_path;level=2;format=" \
+        HDF5_PLUGIN_PATH="$TRACKER_PRELOAD_DIR/vol:$TRACKER_PRELOAD_DIR/vfd:$HDF5_PLUGIN_PATH" \
+        HDF5_DRIVER=hdf5_tracker_vfd \
+        HDF5_DRIVER_CONFIG="${schema_file_path};${TRACKER_VFD_PAGE_SIZE}" \
+        PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH python $DDMD_PATH/deepdrivemd/models/aae/train.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log
    fi
 
 }
@@ -227,8 +251,8 @@ INFERENCE(){
     PREP_TASK_NAME "$stage_name"
 
 
-    # eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
-    # source activate $CONDA_PYTORCH
+    eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
+    source activate $CONDA_PYTORCH
 
     mkdir -p $dest_path
     cd $dest_path
@@ -263,7 +287,11 @@ INFERENCE(){
     # OMP_NUM_THREADS=4 PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH srun -N1 ~/.conda/envs/hm_ddmd_pytorch/bin/python $DDMD_PATH/deepdrivemd/agents/lof/lof.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log 
     # OMP_NUM_THREADS=4 PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH ~/miniconda3/envs/${CONDA_PYTORCH}/bin/python $DDMD_PATH/deepdrivemd/agents/lof/lof.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log     
 
-    conda run -n $CONDA_PYTORCH OMP_NUM_THREADS=4 PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH python $DDMD_PATH/deepdrivemd/agents/lof/lof.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log     
+    HDF5_VOL_CONNECTOR="tracker under_vol=0;under_info={};path=$schema_file_path;level=2;format=" \
+    HDF5_PLUGIN_PATH="$TRACKER_PRELOAD_DIR/vol:$TRACKER_PRELOAD_DIR/vfd:$HDF5_PLUGIN_PATH" \
+    HDF5_DRIVER=hdf5_tracker_vfd \
+    HDF5_DRIVER_CONFIG="${schema_file_path};${TRACKER_VFD_PAGE_SIZE}" \
+    OMP_NUM_THREADS=4 PYTHONPATH=$DDMD_PATH/:$MOLECULES_PATH python $DDMD_PATH/deepdrivemd/agents/lof/lof.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log     
 
 }
 
@@ -416,5 +444,5 @@ echo "Drop cache time: $drop_cache_time milliseconds elapsed."
 ls $EXPERIMENT_PATH/*/*/* -hl
 
 hostname;date;
-UNSET_CONDA_ENV_VARS
+# UNSET_CONDA_ENV_VARS
 # sacct -j $SLURM_JOB_ID -o jobid,submit,start,end,state
