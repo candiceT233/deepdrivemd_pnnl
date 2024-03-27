@@ -135,8 +135,8 @@ OPENMM(){
         yaml_path=$DDMD_PATH/test/bba/${stage_name}_stage_test.yaml
     fi
 
-    # eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
-    # source activate $CONDA_OPENMM
+    eval "$(~/miniconda3/bin/conda shell.bash hook)" # conda init bash
+    source activate $CONDA_OPENMM
 
     mkdir -p $dest_path
     cd $dest_path
@@ -146,7 +146,11 @@ OPENMM(){
     sed -e "s/\$SIM_LENGTH/${SIM_LENGTH}/" -e "s/\$OUTPUT_PATH/${dest_path//\//\\/}/" -e "s/\$EXPERIMENT_PATH/${EXPERIMENT_PATH//\//\\/}/" -e "s/\$DDMD_PATH/${DDMD_PATH//\//\\/}/" -e "s/\$GPU_IDX/${gpu_idx}/" -e "s/\$STAGE_IDX/${STAGE_IDX}/" $yaml_path  > $dest_path/$(basename $yaml_path)
     yaml_path=$dest_path/$(basename $yaml_path)
 
-    conda run -n $CONDA_OPENMM PYTHONPATH=$DDMD_PATH:$MOLECULES_PATH python $DDMD_PATH/deepdrivemd/sim/openmm/run_openmm.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
+    HDF5_VOL_CONNECTOR="tracker under_vol=0;under_info={};path=$schema_file_path;level=2;format=" \
+        HDF5_PLUGIN_PATH="$TRACKER_PRELOAD_DIR/vol:$TRACKER_PRELOAD_DIR/vfd:$HDF5_PLUGIN_PATH" \
+        HDF5_DRIVER=hdf5_tracker_vfd \
+        HDF5_DRIVER_CONFIG="${schema_file_path};${TRACKER_VFD_PAGE_SIZE}" \
+        PYTHONPATH=$DDMD_PATH:$MOLECULES_PATH python $DDMD_PATH/deepdrivemd/sim/openmm/run_openmm.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
 
     # PYTHONPATH=$DDMD_PATH:$MOLECULES_PATH ~/miniconda3/envs/${CONDA_OPENMM}/bin/python $DDMD_PATH/deepdrivemd/sim/openmm/run_openmm.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
     # PYTHONPATH=$DDMD_PATH:$MOLECULES_PATH python $DDMD_PATH/deepdrivemd/sim/openmm/run_openmm.py -c $yaml_path &> ${task_id}_${FUNCNAME[0]}.log &
