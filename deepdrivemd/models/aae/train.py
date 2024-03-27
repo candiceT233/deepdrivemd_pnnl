@@ -70,8 +70,16 @@ def get_h5_training_file(cfg: AAEModelConfig) -> Tuple[Path, List[str]]:
         virtual_name=f"virtual_{cfg.model_tag}",
         node_local_path=cfg.node_local_path,
     )
-    #virtual_h5_path = Path('machine_learning_runs/stage0000/task0000/aggregated.h5')
-    #print(virtual_h5_path)
+    
+    # Get current path
+    curr_path = Path.cwd()
+    aggregate_h5 = Path(f'{curr_path}/../../../molecular_dynamics_runs/stage0000/task0000/aggregated.h5')
+    # check if file exists:
+    if aggregate_h5.exists():
+        # if it exists, we want to use it as the training data
+        virtual_h5_path = aggregate_h5
+    
+    print(f"virtual_h5_path : {virtual_h5_path}")
 
     return virtual_h5_path, h5_files
 
@@ -117,7 +125,7 @@ def get_dataset(
     if dataset_location == "storage":
         # Load training and validation data
         from molecules.ml.datasets import PointCloudDataset
-
+        
         dataset = PointCloudDataset(
             input_path.as_posix(),
             dataset_name,
@@ -129,6 +137,7 @@ def get_dataset(
             normalize=normalize,
             cms_transform=cms_transform,
         )
+        
 
         # split across nodes
         if num_shards > 1:

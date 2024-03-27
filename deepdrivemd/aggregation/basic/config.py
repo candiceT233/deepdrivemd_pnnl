@@ -4,7 +4,7 @@ from deepdrivemd.config import AggregationTaskConfig
 
 class BasicAggegation(AggregationTaskConfig):
     rmsd: bool = True
-    fnc: bool = False
+    fnc: bool = True
     contact_map: bool = False
     point_cloud: bool = True
     verbose: bool = True
